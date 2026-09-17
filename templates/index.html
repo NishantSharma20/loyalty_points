@@ -17,6 +17,11 @@
     <header>
         <h1>☕ Café Rewards</h1>
         <p>Member Rewards Counter</p>
+
+        <a href="/dashboard" class="dashboard-link">
+    📊 Dashboard
+</a>
+
     </header>
 
     <section class="search-box">
@@ -40,40 +45,76 @@
     </section>
 
 
-    <section class="card" id="memberCard">
+    <section class="member-card" id="memberCard">
 
-        <h2>Member Details</h2>
+    <div class="member-top">
 
-        <div class="member-info">
+        <div>
+            <h2 id="memberName">Member Name</h2>
+            <p id="memberPhone">Phone Number</p>
+        </div>
 
-            <div>
-                <span>Name</span>
-                <strong id="memberName">-</strong>
-            </div>
+        <div class="tier-badge" id="memberTier">
+            REGULAR
+        </div>
 
-            <div>
-                <span>Phone</span>
-                <strong id="memberPhone">-</strong>
-            </div>
+    </div>
 
-            <div>
-                <span>Tier</span>
-                <strong id="memberTier">-</strong>
-            </div>
 
-            <div>
-                <span>Current Points</span>
-                <strong id="memberPoints">0</strong>
-            </div>
+    <div class="points-section">
 
-            <div>
-                <span>Lifetime Points</span>
-                <strong id="lifetimePoints">0</strong>
+        <p>Current Balance</p>
+
+        <div class="points-number" id="memberPoints">
+            0
+        </div>
+
+        <span>POINTS</span>
+
+    </div>
+
+
+    <div class="member-stats">
+
+        <div>
+            <small>Lifetime Points</small>
+            <strong id="lifetimePoints">0</strong>
+        </div>
+
+        <div>
+            <small>Current Tier</small>
+            <strong id="memberTierText">
+                Regular
+            </strong>
+        </div>
+
+    </div>
+
+
+    <div class="tier-progress">
+
+        <div class="progress-header">
+
+            <span>Tier Progress</span>
+
+            <span id="tierMessage">
+                Start earning points
+            </span>
+
+        </div>
+
+        <div class="progress-bar">
+
+            <div
+                class="progress-fill"
+                id="progressFill">
             </div>
 
         </div>
 
-    </section>
+    </div>
+
+</section>
 
 
     <div class="actions">
@@ -179,13 +220,69 @@ function updateMember(member) {
         member.phone;
 
     document.getElementById("memberTier").innerText =
-        member.tier || "Regular";
+        member.tier.toUpperCase();
+
+    document.getElementById("memberTierText").innerText =
+        member.tier;
 
     document.getElementById("memberPoints").innerText =
         member.points;
 
     document.getElementById("lifetimePoints").innerText =
         member.lifetime_points;
+
+
+    // Calculate tier progress
+
+    let progress = 0;
+    let message = "";
+
+
+    if (member.tier === "Regular") {
+
+    progress = (member.lifetime_points / 500) * 100;
+    progress = Math.min(progress, 100);
+
+    message =
+        `${Math.max(0, 500 - member.lifetime_points)} points to Silver`;
+
+}
+else if (member.tier === "Silver") {
+
+    progress =
+        ((member.lifetime_points - 500) / 500) * 100;
+
+    progress = Math.min(progress, 100);
+
+    message =
+        `${Math.max(0, 1000 - member.lifetime_points)} points to Gold`;
+
+}
+else if (member.tier === "Gold") {
+
+    progress =
+        ((member.lifetime_points - 1000) / 4000) * 100;
+
+    progress = Math.min(progress, 100);
+
+    message =
+        `${Math.max(0, 5000 - member.lifetime_points)} points to Platinum`;
+
+}
+else {
+
+    progress = 100;
+    message = "🏆 Platinum member";
+
+}
+
+
+    document.getElementById("progressFill")
+        .style.width = progress + "%";
+
+    document.getElementById("tierMessage")
+        .innerText = message;
+
 
     currentPhone = member.phone;
 }

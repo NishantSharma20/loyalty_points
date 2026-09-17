@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>Café Rewards Dashboard</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <header>
+
+        <h1>☕ Café Rewards Dashboard</h1>
+
+        <p>Overview of your rewards program</p>
+
+        <a href="/" class="dashboard-link">
+            ← Counter
+        </a>
+
+    </header>
+
+
+    <!-- Statistics -->
+
+    <div class="dashboard-grid">
+
+        <div class="stat-card">
+
+            <h3>Total Members</h3>
+
+            <p id="totalMembers">0</p>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <h3>Total Purchases</h3>
+
+            <p id="totalPurchases">0</p>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <h3>Points Earned</h3>
+
+            <p id="pointsEarned">0</p>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <h3>Points Redeemed</h3>
+
+            <p id="pointsRedeemed">0</p>
+
+        </div>
+
+    </div>
+
+
+    <!-- Recent Transactions -->
+
+    <section class="card">
+
+        <h2>Recent Transactions</h2>
+
+        <div id="transactions">
+
+            Loading...
+
+        </div>
+
+    </section>
+
+</div>
+
+
+<script>
+
+async function loadDashboard() {
+
+    try {
+
+        const response =
+            await fetch("/api/dashboard");
+
+        const data =
+            await response.json();
+
+
+        document.getElementById("totalMembers")
+            .innerText = data.total_members;
+
+
+        document.getElementById("totalPurchases")
+            .innerText = data.total_purchases;
+
+
+        document.getElementById("pointsEarned")
+            .innerText = data.total_points_earned;
+
+
+        document.getElementById("pointsRedeemed")
+            .innerText = data.total_points_redeemed;
+
+
+        const container =
+            document.getElementById("transactions");
+
+
+        if (data.recent_transactions.length === 0) {
+
+            container.innerHTML =
+                "<p>No transactions yet.</p>";
+
+            return;
+        }
+
+
+        container.innerHTML = `
+
+            <table class="transaction-table">
+
+                <thead>
+
+                    <tr>
+
+                        <th>Member</th>
+
+                        <th>Phone</th>
+
+                        <th>Type</th>
+
+                        <th>Amount</th>
+
+                        <th>Points</th>
+
+                        <th>Date</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    ${data.recent_transactions.map(t => `
+
+                        <tr>
+
+                            <td>${t.name}</td>
+
+                            <td>${t.phone}</td>
+
+                            <td>${t.type}</td>
+
+                            <td>₹${t.amount}</td>
+
+                            <td>
+                                ${t.points > 0 ? "+" : ""}
+                                ${t.points}
+                            </td>
+
+                            <td>
+                                ${new Date(
+                                    t.created_at
+                                ).toLocaleString()}
+                            </td>
+
+                        </tr>
+
+                    `).join("")}
+
+                </tbody>
+
+            </table>
+
+        `;
+
+    }
+
+    catch(error) {
+
+        console.error(error);
+
+    }
+
+}
+
+
+loadDashboard();
+
+</script>
+
+</body>
+
+</html>

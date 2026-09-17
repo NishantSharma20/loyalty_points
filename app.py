@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 import sqlite3
-from datetime import datetime
+from datetime import datetime ,timedelta
 
 app = Flask(__name__)
 
@@ -21,36 +21,64 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             phone TEXT UNIQUE NOT NULL,
-            points INTEGER DEFAULT 0,
-            lifetime_points INTEGER DEFAULT 0,
+           points REAL DEFAULT 0,
+lifetime_points REAL DEFAULT 0,
             created_at TEXT NOT NULL
         )
     """)
 
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            member_id INTEGER NOT NULL,
-            type TEXT NOT NULL,
-            amount REAL DEFAULT 0,
-            points INTEGER DEFAULT 0,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(member_id) REFERENCES members(id)
-        )
-    """)
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        amount REAL DEFAULT 0,
+        points REAL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        expires_at TEXT,
+        FOREIGN KEY(member_id) REFERENCES members(id)
+    )
+""")
 
     # Important for fast phone-number lookup
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_members_phone
         ON members(phone)
     """)
+# Add expiry column to old databases if it does not exist
+       # Add expiry column to old databases if it does not exist
+    columns = conn.execute(
+        "PRAGMA table_info(transactions)"
+    ).fetchall()
 
+    column_names = [column["name"] for column in columns]
+
+    if "expires_at" not in column_names:
+        conn.execute(
+            "ALTER TABLE transactions ADD COLUMN expires_at TEXT"
+        )
+    if "expired" not in column_names:
+     conn.execute(
+        "ALTER TABLE transactions ADD COLUMN expired INTEGER DEFAULT 0"
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(member_id) REFERENCES members(id)
+        )
+    """)
     conn.commit()
     conn.close()
 
 
 def get_tier(lifetime_points):
-    if lifetime_points >= 1000:
+    if lifetime_points >= 5000:
+        return "Platinum"
+    elif lifetime_points >= 1000:
         return "Gold"
     elif lifetime_points >= 500:
         return "Silver"
@@ -58,7 +86,9 @@ def get_tier(lifetime_points):
 
 
 def get_multiplier(tier):
-    if tier == "Gold":
+    if tier == "Platinum":
+        return 0.3
+    elif tier == "Gold":
         return 2
     elif tier == "Silver":
         return 1.5
@@ -69,6 +99,61 @@ def get_multiplier(tier):
 def home():
     return render_template("index.html")
 
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+
+@app.route("/api/dashboard")
+def dashboard_data():
+    conn = get_db()
+
+    total_members = conn.execute(
+        "SELECT COUNT(*) FROM members"
+    ).fetchone()[0]
+
+    total_purchases = conn.execute(
+        "SELECT COUNT(*) FROM transactions WHERE type = 'purchase'"
+    ).fetchone()[0]
+
+    total_points_earned = conn.execute("""
+        SELECT COALESCE(SUM(points), 0)
+        FROM transactions
+        WHERE type = 'purchase'
+    """).fetchone()[0]
+
+    total_points_redeemed = abs(conn.execute("""
+        SELECT COALESCE(SUM(points), 0)
+        FROM transactions
+        WHERE type = 'redemption'
+    """).fetchone()[0])
+
+    recent_transactions = conn.execute("""
+        SELECT
+            t.type,
+            t.amount,
+            t.points,
+            t.created_at,
+            m.name,
+            m.phone
+        FROM transactions t
+        JOIN members m ON t.member_id = m.id
+        ORDER BY t.id DESC
+        LIMIT 10
+    """).fetchall()
+
+    conn.close()
+
+    return jsonify({
+        "total_members": total_members,
+        "total_purchases": total_purchases,
+        "total_points_earned": total_points_earned,
+        "total_points_redeemed": total_points_redeemed,
+        "recent_transactions": [
+            dict(row) for row in recent_transactions
+        ]
+    })
 
 @app.route("/api/member/<phone>")
 def find_member(phone):
@@ -179,15 +264,22 @@ def purchase():
             "success": False,
             "message": "Member not found"
         }), 404
+    old_tier = get_tier(member["lifetime_points"])
 
     tier = get_tier(member["lifetime_points"])
     multiplier = get_multiplier(tier)
 
     # 1 point per ₹100 for Regular
-    earned_points = int((amount / 100) * multiplier)
+
+    earned_points = round((amount / 100) * multiplier, 1)
 
     new_points = member["points"] + earned_points
     new_lifetime_points = member["lifetime_points"] + earned_points
+    new_tier = get_tier(new_lifetime_points)
+    expiry_date = (
+    datetime.now() + timedelta(days=90)
+).isoformat()
+
 
     conn.execute("""
         UPDATE members
@@ -200,13 +292,25 @@ def purchase():
     ))
 
     conn.execute("""
-        INSERT INTO transactions
-        (member_id, type, amount, points, created_at)
-        VALUES (?, 'purchase', ?, ?, ?)
+    INSERT INTO transactions
+    (member_id, type, amount, points, created_at, expires_at)
+    VALUES (?, 'purchase', ?, ?, ?, ?)
+""", (
+    member["id"],
+    amount,
+    earned_points,
+    datetime.now().isoformat(),
+    expiry_date
+))
+    if new_tier != old_tier:
+     conn.execute("""
+        INSERT INTO outbox
+        (member_id, event_type, message, created_at)
+        VALUES (?, ?, ?, ?)
     """, (
         member["id"],
-        amount,
-        earned_points,
+        "tier_changed",
+        f"Congratulations! Your tier changed from {old_tier} to {new_tier}.",
         datetime.now().isoformat()
     ))
 
@@ -236,10 +340,9 @@ def redeem():
     data = request.json
 
     phone = data.get("phone", "").strip()
-
     try:
-        points = int(data.get("points", 0))
-    except:
+        points = float(data.get("points", 0))
+    except (ValueError, TypeError):
         return jsonify({
             "success": False,
             "message": "Invalid points"
@@ -338,7 +441,92 @@ def transactions(phone):
 
     return jsonify([dict(row) for row in rows])
 
+@app.route("/clock", methods=["POST"])
+def clock():
+    conn = get_db()
+    now = datetime.now()
 
+    expired_transactions = conn.execute("""
+        SELECT id, member_id, points
+        FROM transactions
+        WHERE type = 'purchase'
+          AND points > 0
+          AND expired = 0
+          AND expires_at IS NOT NULL
+          AND expires_at <= ?
+    """, (now.isoformat(),)).fetchall()
+
+    total_expired = 0
+
+    for transaction in expired_transactions:
+        points = float(transaction["points"])
+
+        # Remove expired points from current balance
+        conn.execute("""
+            UPDATE members
+            SET points = MAX(0, points - ?)
+            WHERE id = ?
+        """, (
+            points,
+            transaction["member_id"]
+        ))
+
+        # Mark original earning as expired
+        conn.execute("""
+            UPDATE transactions
+            SET expired = 1
+            WHERE id = ?
+        """, (transaction["id"],))
+
+        # Record expiry transaction
+        conn.execute("""
+            INSERT INTO transactions
+            (member_id, type, amount, points, created_at, expires_at, expired)
+            VALUES (?, 'expiry', 0, ?, ?, NULL, 1)
+        """, (
+            transaction["member_id"],
+            -points,
+            now.isoformat()
+        ))
+
+        total_expired += points
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "success": True,
+        "expired_points": round(total_expired, 1),
+        "expired_transactions": len(expired_transactions),
+        "timestamp": now.isoformat()
+    })
+@app.route("/outbox", methods=["GET"])
+def get_outbox():
+    conn = get_db()
+
+    notifications = conn.execute("""
+        SELECT
+            id,
+            member_id,
+            event_type,
+            message,
+            created_at
+        FROM outbox
+        ORDER BY id ASC
+    """).fetchall()
+
+    conn.close()
+
+    return jsonify([
+        {
+            "id": notification["id"],
+            "member_id": notification["member_id"],
+            "event_type": notification["event_type"],
+            "message": notification["message"],
+            "created_at": notification["created_at"]
+        }
+        for notification in notifications
+    ])
 if __name__ == "__main__":
     init_db()
     app.run(host="0.0.0.0", port=5000, debug=True)
