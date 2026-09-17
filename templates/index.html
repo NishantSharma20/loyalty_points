@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Café Rewards Counter</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <header>
+        <h1>☕ Café Rewards</h1>
+        <p>Member Rewards Counter</p>
+    </header>
+
+    <section class="search-box">
+
+        <h2>Find Member</h2>
+
+        <div class="row">
+
+            <input
+                type="text"
+                id="phone"
+                placeholder="Enter phone number"
+            >
+
+            <button onclick="findMember()">
+                Search
+            </button>
+
+        </div>
+
+    </section>
+
+
+    <section class="card" id="memberCard">
+
+        <h2>Member Details</h2>
+
+        <div class="member-info">
+
+            <div>
+                <span>Name</span>
+                <strong id="memberName">-</strong>
+            </div>
+
+            <div>
+                <span>Phone</span>
+                <strong id="memberPhone">-</strong>
+            </div>
+
+            <div>
+                <span>Tier</span>
+                <strong id="memberTier">-</strong>
+            </div>
+
+            <div>
+                <span>Current Points</span>
+                <strong id="memberPoints">0</strong>
+            </div>
+
+            <div>
+                <span>Lifetime Points</span>
+                <strong id="lifetimePoints">0</strong>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <div class="actions">
+
+        <section class="card">
+
+            <h2>Record Purchase</h2>
+
+            <input
+                type="number"
+                id="purchaseAmount"
+                placeholder="Purchase amount ₹"
+            >
+
+            <button onclick="recordPurchase()">
+                Add Purchase
+            </button>
+
+        </section>
+
+
+        <section class="card">
+
+            <h2>Redeem Points</h2>
+
+            <input
+                type="number"
+                id="redeemPoints"
+                placeholder="Points to redeem"
+            >
+
+            <button onclick="redeemPoints()">
+                Redeem
+            </button>
+
+        </section>
+
+    </div>
+
+
+    <section class="card">
+
+        <h2>Add New Member</h2>
+
+        <input
+            type="text"
+            id="newName"
+            placeholder="Member name"
+        >
+
+        <input
+            type="text"
+            id="newPhone"
+            placeholder="Phone number"
+        >
+
+        <button onclick="createMember()">
+            Create Member
+        </button>
+
+    </section>
+
+
+    <section class="card">
+
+        <h2>Transaction History</h2>
+
+        <div id="history">
+            Search a member to see transactions.
+        </div>
+
+    </section>
+
+
+    <div id="message"></div>
+
+</div>
+
+
+<script>
+
+let currentPhone = "";
+
+
+function showMessage(message, success = true) {
+
+    const box = document.getElementById("message");
+
+    box.innerText = message;
+
+    box.className = success
+        ? "message success"
+        : "message error";
+}
+
+
+function updateMember(member) {
+
+    document.getElementById("memberName").innerText =
+        member.name;
+
+    document.getElementById("memberPhone").innerText =
+        member.phone;
+
+    document.getElementById("memberTier").innerText =
+        member.tier || "Regular";
+
+    document.getElementById("memberPoints").innerText =
+        member.points;
+
+    document.getElementById("lifetimePoints").innerText =
+        member.lifetime_points;
+
+    currentPhone = member.phone;
+}
+
+
+async function findMember() {
+
+    const phone =
+        document.getElementById("phone").value.trim();
+
+    if (!phone) {
+        showMessage("Please enter a phone number.", false);
+        return;
+    }
+
+    try {
+
+        const response =
+            await fetch(`/api/member/${phone}`);
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            showMessage(data.message, false);
+            return;
+        }
+
+        updateMember(data.member);
+
+        await loadTransactions();
+
+        showMessage("Member found.");
+
+    } catch (error) {
+
+        showMessage("Server error.", false);
+    }
+}
+
+
+async function createMember() {
+
+    const name =
+        document.getElementById("newName").value.trim();
+
+    const phone =
+        document.getElementById("newPhone").value.trim();
+
+    if (!name || !phone) {
+        showMessage(
+            "Enter both name and phone number.",
+            false
+        );
+        return;
+    }
+
+    const response = await fetch("/api/member", {
+
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+            name: name,
+            phone: phone
+        })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+
+        showMessage(data.message, false);
+        return;
+    }
+
+    updateMember(data.member);
+
+    document.getElementById("phone").value = phone;
+
+    showMessage("Member created successfully.");
+}
+
+
+async function recordPurchase() {
+
+    if (!currentPhone) {
+        showMessage(
+            "Search a member first.",
+            false
+        );
+        return;
+    }
+
+    const amount =
+        document.getElementById("purchaseAmount").value;
+
+    if (!amount || amount <= 0) {
+
+        showMessage(
+            "Enter a valid purchase amount.",
+            false
+        );
+
+        return;
+    }
+
+    const response = await fetch("/api/purchase", {
+
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+            phone: currentPhone,
+            amount: amount
+        })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+
+        showMessage(data.message, false);
+        return;
+    }
+
+    updateMember(data.member);
+
+    document.getElementById("purchaseAmount").value = "";
+
+    await loadTransactions();
+
+    showMessage(
+        `${data.earned_points} points added successfully.`
+    );
+}
+
+
+async function redeemPoints() {
+
+    if (!currentPhone) {
+
+        showMessage(
+            "Search a member first.",
+            false
+        );
+
+        return;
+    }
+
+    const points =
+        document.getElementById("redeemPoints").value;
+
+    if (!points || points <= 0) {
+
+        showMessage(
+            "Enter valid points.",
+            false
+        );
+
+        return;
+    }
+
+    const response = await fetch("/api/redeem", {
+
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+            phone: currentPhone,
+            points: points
+        })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+
+        showMessage(data.message, false);
+        return;
+    }
+
+    updateMember(data.member);
+
+    document.getElementById("redeemPoints").value = "";
+
+    await loadTransactions();
+
+    showMessage(
+        `${data.redeemed_points} points redeemed.`
+    );
+}
+
+
+async function loadTransactions() {
+
+    if (!currentPhone) {
+        return;
+    }
+
+    const response =
+        await fetch(
+            `/api/member/${currentPhone}/transactions`
+        );
+
+    const transactions =
+        await response.json();
+
+    const history =
+        document.getElementById("history");
+
+    if (transactions.length === 0) {
+
+        history.innerHTML =
+            "<p>No transactions yet.</p>";
+
+        return;
+    }
+
+    history.innerHTML = transactions.map(t => {
+
+        const type =
+            t.type === "purchase"
+                ? "Purchase"
+                : "Redemption";
+
+        return `
+            <div class="transaction">
+                <strong>${type}</strong>
+
+                <span>
+                    ₹${t.amount}
+                </span>
+
+                <span>
+                    ${t.points > 0 ? "+" : ""}${t.points} points
+                </span>
+
+                <small>
+                    ${new Date(t.created_at).toLocaleString()}
+                </small>
+            </div>
+        `;
+
+    }).join("");
+}
+
+</script>
+
+</body>
+</html>
